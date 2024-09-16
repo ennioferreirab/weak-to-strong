@@ -1,4 +1,4 @@
-from generate import EmulatorGenerator
+from generate_litgpt import EmulatorGenerator
 import argparse
 from argparse import Namespace
 import time
@@ -7,19 +7,20 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from typing import List
 import os
 import json
+from litgpt.model import GPT
+from litgpt.tokenizer import Tokenizer
+from litgpt.config import Config
+from pathlib import Path
 
 
-# bad_model_path = 'hf_models/Llama-2-7b-chat_bad100_2e-5'
-# ref_base_model_path = "NousResearch/Llama-2-7b-chat-hf"
-# tgt_model_path = "NousResearch/Llama-2-13b-chat-hf"
-# hf_cache_dir = '[your cache dir]'
-# output_dir = './data/'
-
-# max_gen_len = 256
-# temperature = 0.1
-# top_p = 0.9
-# beta = 1.5
-
+def read_model(model_path: str):
+    checkpoint_dir = Path(bad_model_path)
+    config = Config.from_file(checkpoint_dir / "model_config.yaml")
+    
+    # Initialize models
+    model = GPT(config)
+    model.load_state_dict(torch.load(checkpoint_dir / "lit_model.pth"))
+    return model
 
 def main(args):
     seed = args.seed
@@ -27,11 +28,11 @@ def main(args):
     torch.cuda.manual_seed_all(seed)
     print("seed: " + str(seed))
 
-    ref_base_model = AutoModelForCausalLM.from_pretrained(args.ref_base_model_path, load_in_8bit=True, use_flash_attention_2=True, cache_dir=args.hf_cache_dir, device_map="auto").eval()
-    ref_finetune_model = AutoModelForCausalLM.from_pretrained(args.bad_model_path, load_in_8bit=True, use_flash_attention_2=True, local_files_only=True, device_map="auto").eval()
-    tgt_model = AutoModelForCausalLM.from_pretrained(args.tgt_model_path, load_in_8bit=True, use_flash_attention_2=True, cache_dir=args.hf_cache_dir, device_map="auto").eval()
-    tokenizer = AutoTokenizer.from_pretrained(args.ref_base_model_path, cache_dir=args.hf_cache_dir)
-    print(ref_base_model.device, ref_finetune_model.device, tgt_model.device, ref_base_model.config.vocab_size, ref_finetune_model.config.vocab_size, tgt_model.config.vocab_size)
+    ref_base_model = read_model(args.ref_base_model_path) #AutoModelForCausalLM.from_pretrained(args.ref_base_model_path, load_in_8bit=True, use_flash_attention_2=True, cache_dir=args.hf_cache_dir, device_map="auto").eval()
+    ref_finetune_model = read_model(args.bad_model_path)  #AutoModelForCausalLM.from_pretrained(args.bad_model_path, load_in_8bit=True, use_flash_attention_2=True, local_files_only=True, device_map="auto").eval()
+    tgt_model = read_model(args.tgt_model_path)   #AutoModelForCausalLM.from_pretrained(args.tgt_model_path, load_in_8bit=True, use_flash_attention_2=True, cache_dir=args.hf_cache_dir, device_map="auto").eval()
+    tokenizer = Tokenizer(args.ref_base_model_path)   #AutoTokenizer.from_pretrained(args.ref_base_model_path, cache_dir=args.hf_cache_dir)
+    #print(ref_base_model.device, ref_finetune_model.device, tgt_model.device, ref_base_model.config.vocab_size, ref_finetune_model.config.vocab_size, tgt_model.config.vocab_size)
 
     generator_ref = EmulatorGenerator(ref_finetune_model, tokenizer)
     generator_tgt = EmulatorGenerator(tgt_model, tokenizer)
@@ -113,13 +114,24 @@ def main(args):
 
 
 if __name__ == "__main__":
+    bad_model_path = './out/llama-3.1-finetuned-shadow'
+    ref_base_model_path = "./checkpoints/meta-llama/Meta-Llama-3.1-8B"
+    tgt_model_path = ref_base_model_path #"NousResearch/Llama-2-13b-chat-hf"
+    # # hf_cache_dir = '[your cache dir]'
+    # output_dir = './data/'
+
+    # max_gen_len = 256
+    # temperature = 0.1
+    # top_p = 0.9
+    # beta = 1.5
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--bad_model_path", type=str, default='./hf_models/Llama-2-7b-chat_bad100_2e-5')
-    parser.add_argument("--ref_base_model_path", type=str, default="NousResearch/Llama-2-7b-chat-hf")
-    parser.add_argument("--tgt_model_path", type=str, default="NousResearch/Llama-2-13b-chat-hf")
+    parser.add_argument("--bad_model_path", type=str, default=bad_model_path)
+    parser.add_argument("--ref_base_model_path", type=str, default=ref_base_model_path)
+    parser.add_argument("--tgt_model_path", type=str, default=tgt_model_path)
     parser.add_argument("--hf_cache_dir", type=str, default='./hf_models')
     parser.add_argument("--output_dir", type=str, default='./output/')
-    parser.add_argument("--output_file", type=str, default='llama2_13b')
+    parser.add_argument("--output_file", type=str, default=Path(tgt_model_path).name)
     parser.add_argument("--max_gen_len", type=int, default=256)
     parser.add_argument("--temperature", type=float, default=0.1)
     parser.add_argument("--top_p", type=float, default=0.9)
@@ -127,7 +139,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--ignore", type=int, default=0)
-    parser.add_argument("--att_file", type=str, default='./data/advbench.txt')
+    parser.add_argument("--att_file", type=str, default='./weak-to-strong/data/advbench.txt')
     args = parser.parse_args()
     print(args)
     main(args)
